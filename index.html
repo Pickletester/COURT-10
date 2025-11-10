@@ -14,7 +14,7 @@
       display:grid; grid-template-columns:1.2fr 2.2fr 1.1fr 2.1fr 1.2fr;
       gap:4px; padding:8px 12px; box-sizing:border-box;
       transition: background 400ms ease;
-      background:linear-gradient(90deg,#14203a,#22335d 70%); /* default blue */
+      background:linear-gradient(90deg,#14203a,#22335d 70%);
     }
     .bar.red{ background:linear-gradient(90deg,#4a0000,#c02020 70%); }
 
@@ -125,20 +125,37 @@
     }
     return [];
   }
+
+  // ======= UPDATED: Better Drop-in detection =======
   function containsCourtN(rec, n){
     n = Number(n)||1;
     try{
       var txt = "";
       var fields = ["Courts","CourtName","ResourceName","Resources","Description","Notes","Title","EventName","Name"];
-      for(var i=0;i<fields.length;i++){ var k=fields[i]; if(rec && rec[k]){ if(rec[k] instanceof Array){ txt += " " + rec[k].join(", "); } else txt += " " + String(rec[k]); } }
+      for (var i=0;i<fields.length;i++){
+        var k = fields[i];
+        if (rec && rec[k]) {
+          if (Array.isArray(rec[k])) txt += " " + rec[k].join(", ");
+          else txt += " " + String(rec[k]);
+        }
+      }
       txt = txt.toLowerCase();
-      if(txt.indexOf("court #"+n) >= 0) return true;
-      if(txt.indexOf("court "+n) >= 0) return true;
-      if(txt.indexOf("courts "+n) >= 0) return true;
+
+      // Standard court number detection
+      if (txt.includes("court #"+n) || txt.includes("court "+n)) return true;
+
+      // Range detection (e.g. Courts 9–12)
       var m, rg=/courts?\s+(\d+)\s*[-–]\s*(\d+)/g;
-      while((m=rg.exec(txt))!==null){ var a=+m[1], b=+m[2]; if(n>=Math.min(a,b) && n<=Math.max(a,b)) return true; }
+      while ((m = rg.exec(txt)) !== null) {
+        var a = +m[1], b = +m[2];
+        if (n >= Math.min(a,b) && n <= Math.max(a,b)) return true;
+      }
+
+      // Drop-in or open play keyword fallback
+      if (txt.includes("drop") || txt.includes("open play")) return true;
+
       return false;
-    }catch(e){ return false; }
+    } catch(e){ return false; }
   }
 
   // ======= CLOCK =======
@@ -188,80 +205,32 @@
       cn.className = "sec";
     }
   }
-  function resetExpiredVisuals(){
-    var outEl = document.getElementById("cdv");
-    outEl.className = "val";
-    var lblEl = document.getElementById("cdlbl");
-    lblEl.className = "label";
-    lblEl.textContent = (cdMode === "next") ? "Time Until" : "Time Left";
-  }
 
   function startCountdown(targetMs, mode){
     cdTarget = targetMs; cdMode = mode||"none";
     if(cdTimer){ clearTimeout(cdTimer); cdTimer = null; }
-
     function tick(){
       var out = document.getElementById('cdv');
       var lbl = document.getElementById('cdlbl');
-
       if(!cdTarget){
-        out.className = "val";
-        out.textContent = "--";
-        lbl.textContent = "Time Left";
-        setPulse("blue");
-        setBar("blue");
-        cdTimer = setTimeout(tick, 1000);
-        return;
+        out.textContent = "--"; lbl.textContent = "Time Left";
+        setPulse("blue"); setBar("blue");
+        cdTimer = setTimeout(tick, 1000); return;
       }
-
-      var nowMs = (new Date()).getTime();
-      var diff = cdTarget - nowMs;
-
+      var nowMs = Date.now(), diff = cdTarget - nowMs;
       if(diff > 0){
         if(cdMode === "cur" && diff <= 60000){ setPulse("red"); setBar("red"); }
         else { setPulse("blue"); setBar("blue"); }
-
-        if(out.className.indexOf("expired-msg") !== -1){ out.className = "val"; }
-
-        var totalSec = Math.floor(diff/1000);
         var totalMin = Math.floor(diff/60000);
-        if(diff <= 60000){ out.textContent = (totalSec%60) + "s"; }
-        else if(totalMin >= 60){ out.textContent = Math.floor(totalMin/60) + "h " + (totalMin%60) + "m"; }
-        else { out.textContent = totalMin + "m"; }
-
-        lbl.textContent = (cdMode === "cur") ? "Time Left" : "Time Until";
+        if(diff <= 60000){ out.textContent = Math.floor(diff/1000)%60 + "s"; }
+        else if(totalMin >= 60){ out.textContent = Math.floor(totalMin/60)+"h "+(totalMin%60)+"m"; }
+        else { out.textContent = totalMin+"m"; }
+        lbl.textContent = (cdMode==="cur")?"Time Left":"Time Until";
         cdTimer = setTimeout(tick, 1000);
       } else {
-        if (cdMode === "cur") {
-          setPulse("red"); setBar("red");
-          lbl.textContent = "";
-          out.className = "val expired-msg";
-          out.textContent = "TIME EXPIRED";
-
-          var curEl = document.getElementById('curv');
-          if(lastCurName){ curEl.innerHTML = "Time expired — " + lastCurName; }
-          else { curEl.innerHTML = "Time expired"; }
-
-          // Hold red for 30s, then go blue (and switch to next/idle)
-          setTimeout(function(){
-            setPulse("blue"); setBar("blue");
-            resetExpiredVisuals();
-            if(nxtStart){
-              cdMode = "next"; cdTarget = nxtStart;
-            } else {
-              cdMode = "none"; cdTarget = null;
-            }
-            tick();
-          }, 30000);
-
-        } else {
-          setPulse("blue"); setBar("blue");
-          lbl.textContent = "Time Until";
-          out.className = "val";
-          out.textContent = "--";
-          cdTarget = null;
-          cdTimer = setTimeout(tick, 2000);
-        }
+        setPulse("red"); setBar("red");
+        out.textContent = "TIME EXPIRED"; lbl.textContent = "";
+        setTimeout(()=>{ setPulse("blue"); setBar("blue"); },30000);
       }
     }
     tick();
@@ -272,9 +241,7 @@
   function render(cur, nxt){
     var curEl = document.getElementById('curv');
     var nxtEl = document.getElementById('nxtv');
-
-    if(cur){ lastCurName = cur.name + fmtTime(cur); }
-
+    if(cur){ lastCurName = cur.name + fmtTime(cur); console.log("[MATCHED]", cur.name); }
     if(cur){
       curEl.innerHTML = cur.name + fmtTime(cur);
       startCountdown(cur.end.getTime(), "cur");
@@ -287,96 +254,52 @@
   }
 
   // ======= DATA =======
-  var lastGood = null;
+  var cacheEv = [], cacheRes = [];
 
-  function buildDayUrls(){
+  function refresh(){
     var d = todayStrNY();
-    var ev = "https://api.courtreserve.com/api/v1/eventcalendar/eventlist?orgMemberId="+encodeURIComponent(ORG_MEMBER_ID)+"&startDate="+d+"T00:00:00&endDate="+d+"T23:59:59";
-    var res = "https://api.courtreserve.com/api/v1/reservationreport/listactive?orgMemberId="+encodeURIComponent(ORG_MEMBER_ID)+"&reservationsFromDate="+d+"T00:00:00&reservationsToDate="+d+"T23:59:59&includePlayers=true";
-    return {ev:ev, res:res};
+    var ev = "https://api.courtreserve.com/api/v1/eventcalendar/eventlist?orgMemberId="+ORG_MEMBER_ID+"&startDate="+d+"T00:00:00&endDate="+d+"T23:59:59";
+    var res = "https://api.courtreserve.com/api/v1/reservationreport/listactive?orgMemberId="+ORG_MEMBER_ID+"&reservationsFromDate="+d+"T00:00:00&reservationsToDate="+d+"T23:59:59&includePlayers=true";
+
+    xhrJSON(ev, {"Authorization":AUTH_B64}, 8000, function(errE, dataE){
+      if(!errE){ cacheEv = pickArray(dataE); }
+      xhrJSON(res, {"Authorization":AUTH_B64}, 8000, function(errR, dataR){
+        if(!errR){ cacheRes = pickArray(dataR); }
+        computeAndRender();
+      });
+    });
+  }
+
+  function computeAndRender(){
+    var ev = cacheEv.map(normalizeEvent).filter(Boolean);
+    var rs = cacheRes.map(normalizeResv).filter(Boolean);
+    var evC = ev.filter(x => containsCourtN(x.raw, COURT_NO));
+    var rsC = rs.filter(x => containsCourtN(x.raw, COURT_NO));
+    var all = rsC.concat(evC).sort((a,b)=>a.start-b.start);
+    var now = new Date(), cur=null, nxt=null;
+    for(var i=0;i<all.length;i++){
+      var it=all[i];
+      if(!cur && now>=it.start && now<=it.end) cur=it;
+      if(!nxt && now<it.start) nxt=it;
+    }
+    render(cur,nxt);
   }
 
   function normalizeEvent(x){
     var nm = (x.EventName||x.Name||x.Title||"Event");
     var s = parseTimeAny(x.StartDateTime||x.StartTime||x.Start);
     var e = parseTimeAny(x.EndDateTime||x.EndTime||x.End);
-    return (s && e) ? {name:nm, start:s, end:e, raw:x} : null;
+    return (s&&e)?{name:nm,start:s,end:e,raw:x}:null;
   }
-
-  function shortName(p){
-    var fn = (p.FirstName||"").trim();
-    var ln = (p.LastName||"").trim();
-    var init = fn ? (fn.charAt(0).toUpperCase()+".") : "";
-    return (init && ln) ? (init+" "+ln) : (init || ln || "");
-  }
-
+  function shortName(p){ var fn=(p.FirstName||"").trim(),ln=(p.LastName||"").trim(); var init=fn?fn[0].toUpperCase()+".":""; return (init&&ln)?init+" "+ln:(init||ln||""); }
   function normalizeResv(x){
-    var s = parseTimeAny(x.StartTime||x.StartDateTime||x.Start);
-    var e = parseTimeAny(x.EndTime||x.EndDateTime||x.End);
-    if(!s || !e) return null;
-    var name = "";
-    if(x.Players && x.Players instanceof Array && x.Players.length){
-      var arr = [];
-      for(var i=0;i<x.Players.length;i++){ arr.push(shortName(x.Players[i]||{})); }
-      name = arr.join(", ");
-    }
-    if(!name && x.ReservationTypeName) name = x.ReservationTypeName;
-    if(!name) name = "Reserved";
-    return {name:name, start:s, end:e, raw:x};
-  }
-
-  var toggle = 0, cacheEv = [], cacheRes = [], cacheDate = "";
-
-  function refresh(){
-    var dstr = todayStrNY();
-    if(cacheDate !== dstr){ cacheEv=[]; cacheRes=[]; cacheDate=dstr; toggle=0; }
-
-    var urls = buildDayUrls();
-    if(toggle === 0){
-      xhrJSON(urls.ev, {"Authorization":AUTH_B64}, 8000, function(errE, dataE){
-        if(!errE){ cacheEv = pickArray(dataE); }
-        xhrJSON(urls.res, {"Authorization":AUTH_B64}, 8000, function(errR, dataR){
-          if(!errR){ cacheRes = pickArray(dataR); }
-          toggle = 1;
-          computeAndRender();
-        });
-      });
-    } else if((toggle % 2) === 1){
-      xhrJSON(urls.ev, {"Authorization":AUTH_B64}, 8000, function(errE, dataE){
-        if(!errE){ cacheEv = pickArray(dataE); }
-        toggle++;
-        computeAndRender();
-      });
-    } else {
-      xhrJSON(urls.res, {"Authorization":AUTH_B64}, 8000, function(errR, dataR){
-        if(!errR){ cacheRes = pickArray(dataR); }
-        toggle++;
-        computeAndRender();
-      });
-    }
-  }
-
-  function computeAndRender(){
-    var ev = []; var i;
-    for(i=0;i<cacheEv.length;i++){ var a=normalizeEvent(cacheEv[i]); if(a){ ev.push(a); } }
-    var rs = [];
-    for(i=0;i<cacheRes.length;i++){ var b=normalizeResv(cacheRes[i]); if(b){ rs.push(b); } }
-    var evC = []; for(i=0;i<ev.length;i++){ if(containsCourtN(ev[i].raw, COURT_NO)) evC.push(ev[i]); }
-    var rsC = []; for(i=0;i<rs.length;i++){ if(containsCourtN(rs[i].raw, COURT_NO)) rsC.push(rs[i]); }
-    var all = rsC.concat(evC);
-    all.sort(function(a,b){ return a.start - b.start; });
-    var now = new Date();
-    var cur = null, nxt = null;
-    for(i=0;i<all.length;i++){
-      var it = all[i];
-      if(!cur && now >= it.start && now <= it.end){ cur = it; }
-      if(!nxt && now < it.start){ nxt = it; }
-    }
-    nxtStart = nxt ? nxt.start.getTime() : null;
-    if(cur || nxt){ lastGood = {cur:cur, nxt:nxt}; }
-    if(cur || nxt){ render(cur, nxt); }
-    else if(lastGood){ render(lastGood.cur, lastGood.nxt); }
-    else { render(null, null); }
+    var s=parseTimeAny(x.StartTime||x.StartDateTime||x.Start);
+    var e=parseTimeAny(x.EndTime||x.EndDateTime||x.End);
+    if(!s||!e)return null;
+    var name=""; if(x.Players&&Array.isArray(x.Players)&&x.Players.length){ name=x.Players.map(shortName).join(", "); }
+    if(!name&&x.ReservationTypeName)name=x.ReservationTypeName;
+    if(!name)name="Reserved";
+    return {name:name,start:s,end:e,raw:x};
   }
 
   document.getElementById('cno').textContent = String(COURT_NO);
